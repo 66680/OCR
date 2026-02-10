@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from invstruct.schema_version import RECORD_SCHEMA_VERSION
+
 
 class FieldProvenance(BaseModel):
     page: int | None = None
@@ -20,6 +22,7 @@ class SourceInfo(BaseModel):
 
 class InvoiceRecord(BaseModel):
     source: SourceInfo
+    record_schema_version: int = RECORD_SCHEMA_VERSION
     merchant: str | None = None
     issue_date: str | None = None
     total_amount_gross: float | None = None

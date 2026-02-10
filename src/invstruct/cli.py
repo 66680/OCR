@@ -6,11 +6,21 @@ from pathlib import Path
 
 import typer
 
+from invstruct import __version__
+from invstruct.contracts.export_schema import (
+    get_export_contract_schema,
+    validate_export_csv,
+    validate_export_xlsx,
+)
+from invstruct.contracts.record_schema import get_invoice_record_json_schema
 from invstruct.errors import error_payload
+from invstruct.schema_version import EXPORT_SCHEMA_VERSION, RECORD_SCHEMA_VERSION
 from invstruct.schemas import InvoiceRecord, SourceInfo
 from invstruct.utils.trace import generate_trace_id
 
 app = typer.Typer(help="invstruct command line interface")
+contract_app = typer.Typer(help="Contract governance commands")
+app.add_typer(contract_app, name="contract")
 
 
 @app.command("parse")
@@ -49,6 +59,204 @@ def parse(
 @app.command("health")
 def health() -> None:
     typer.echo("ok")
+
+
+@contract_app.command("show")
+def contract_show() -> None:
+    payload = {
+        "tool_version": __version__,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "export_schema_version": EXPORT_SCHEMA_VERSION,
+        "paths": {
+            "record_schema": "src/invstruct/contracts/record_schema.py",
+            "export_schema": "src/invstruct/contracts/export_schema.py",
+        },
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+@contract_app.command("schema")
+def contract_schema(
+    target: str = typer.Argument(..., help="record|export"),
+) -> None:
+    if target not in {"record", "export"}:
+        trace_id = generate_trace_id()
+        typer.echo(
+            json.dumps(
+                error_payload(
+                    code="E5002",
+                    message="Contract validation failed",
+                    trace_id=trace_id,
+                    details={"reason": "schema_target_invalid", "target": target},
+                ),
+                ensure_ascii=False,
+            )
+        )
+        raise typer.Exit(code=2)
+
+    schema = (
+        get_invoice_record_json_schema()
+        if target == "record"
+        else get_export_contract_schema()
+    )
+    typer.echo(json.dumps(schema, ensure_ascii=False, sort_keys=True))
+
+
+@contract_app.command("validate-records")
+def validate_records(
+    records_jsonl: Path = typer.Argument(..., exists=True, readable=True),
+    max_errors: int = typer.Option(10, "--max-errors"),
+) -> None:
+    total = 0
+    valid = 0
+    invalid = 0
+    invalid_examples: list[dict[str, object]] = []
+
+    with records_jsonl.open("r", encoding="utf-8", errors="ignore") as file_obj:
+        for line_no, line in enumerate(file_obj, start=1):
+            content = line.strip()
+            if not content:
+                continue
+            total += 1
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as exc:
+                invalid += 1
+                if len(invalid_examples) < max_errors:
+                    invalid_examples.append(
+                        {
+                            "line_no": line_no,
+                            "reason": "invalid_json",
+                            "message": str(exc),
+                        }
+                    )
+                continue
+
+            try:
+                InvoiceRecord.model_validate(data)
+                valid += 1
+            except Exception as exc:
+                invalid += 1
+                if len(invalid_examples) < max_errors:
+                    trace_id = ""
+                    if isinstance(data, dict):
+                        source = data.get("source")
+                        if isinstance(source, dict):
+                            trace_id = str(source.get("trace_id", ""))
+                    invalid_examples.append(
+                        {
+                            "line_no": line_no,
+                            "reason": "record_schema_invalid",
+                            "trace_id": trace_id,
+                            "message": str(exc),
+                        }
+                    )
+
+    summary = {
+        "total": total,
+        "ok": valid,
+        "invalid": invalid,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+    }
+    if invalid > 0:
+        trace_id = generate_trace_id()
+        typer.echo(
+            json.dumps(
+                error_payload(
+                    code="E5002",
+                    message="Contract validation failed",
+                    trace_id=trace_id,
+                    details={
+                        "summary": summary,
+                        "invalid_examples": invalid_examples,
+                    },
+                ),
+                ensure_ascii=False,
+            )
+        )
+        raise typer.Exit(code=2)
+
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "summary": summary,
+                "invalid_examples": [],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+@contract_app.command("validate-export")
+def validate_export(
+    csv_path: Path | None = typer.Option(None, "--csv"),
+    xlsx_path: Path | None = typer.Option(None, "--xlsx"),
+    no_header_comments: bool = typer.Option(False, "--no-header-comments"),
+) -> None:
+    if csv_path is None and xlsx_path is None:
+        trace_id = generate_trace_id()
+        typer.echo(
+            json.dumps(
+                error_payload(
+                    code="E5002",
+                    message="Contract validation failed",
+                    trace_id=trace_id,
+                    details={"reason": "missing_export_input"},
+                ),
+                ensure_ascii=False,
+            )
+        )
+        raise typer.Exit(code=2)
+
+    errors: list[str] = []
+    details: dict[str, object] = {}
+    if csv_path is not None:
+        csv_result = validate_export_csv(
+            csv_path,
+            expect_version=EXPORT_SCHEMA_VERSION,
+            header_comments=not no_header_comments,
+        )
+        details["csv"] = csv_result.as_dict()
+        if not csv_result.ok:
+            errors.extend(csv_result.errors)
+
+    if xlsx_path is not None:
+        xlsx_result = validate_export_xlsx(
+            xlsx_path,
+            expect_version=EXPORT_SCHEMA_VERSION,
+        )
+        details["xlsx"] = xlsx_result.as_dict()
+        if not xlsx_result.ok:
+            errors.extend(xlsx_result.errors)
+
+    if errors:
+        trace_id = generate_trace_id()
+        typer.echo(
+            json.dumps(
+                error_payload(
+                    code="E5002",
+                    message="Contract validation failed",
+                    trace_id=trace_id,
+                    details={"errors": errors, "results": details},
+                ),
+                ensure_ascii=False,
+            )
+        )
+        raise typer.Exit(code=2)
+
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "export_schema_version": EXPORT_SCHEMA_VERSION,
+                "results": details,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 def main() -> None:
