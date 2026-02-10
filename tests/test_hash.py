@@ -1,0 +1,12 @@
+from pathlib import Path
+
+from invstruct.utils.hash import sha256_file
+
+
+def test_sha256_file(tmp_path: Path) -> None:
+    sample = tmp_path / "sample.txt"
+    sample.write_text("abc", encoding="utf-8")
+    assert (
+        sha256_file(sample)
+        == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    )
