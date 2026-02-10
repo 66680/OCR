@@ -24,3 +24,15 @@
 ### Next
 - Add PR annotation output for failed contract gates to speed up triage.
 - Add a release checklist item to explicitly confirm migration notes quality when schema versions change.
+
+## M1.10: CI triage acceleration and release gate
+
+### Done
+- Enhanced CI workflows to publish richer `$GITHUB_STEP_SUMMARY` diagnostics for pytest, schema policy, and contract gates.
+- Added machine-readable `ci_gate_report.json` artifact output and upload for gate triage.
+- Added tag-triggered `release-gate.yml` workflow to enforce test/policy/contract checks before release.
+- Added tests for gate report generation and tag-mode schema policy logic.
+
+### Next
+- Add PR-level annotations that link directly to failing command snippets in artifacts.
+- Extend release gate to verify changelog consistency with schema/version metadata.

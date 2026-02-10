@@ -10,7 +10,11 @@
 - Added M1.9 CI workflow gates with pytest + contract gate scripts on push/pull_request.
 - Added schema bump policy script to require Migration Notes when schema version constants change.
 - Added regression tests for CI gate script behavior and schema bump policy logic.
+- Added M1.10 CI summary enhancements with failure-tail diagnostics and local reproduce hints.
+- Added gate report artifact (`out/ci_gate_report.json`) emission and workflow upload for PR triage.
+- Added release gate workflow for tag pushes (`v*`) enforcing tests + schema policy + contract gates.
+- Added regression tests for gate report persistence and tag-mode policy checks.
 
 ## Next
-- Add CI summary annotations to surface which contract gate failed directly in PR checks.
-- Add release automation that ties schema version bumps to tagged migration notes templates.
+- Add GitHub Checks annotations mapped from gate report failed steps for one-click triage.
+- Add signed release pipeline wiring after release gate success.

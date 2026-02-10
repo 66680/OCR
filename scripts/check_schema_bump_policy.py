@@ -53,6 +53,28 @@ def evaluate_policy(
     )
 
 
+def evaluate_tag_policy(
+    *,
+    previous_schema_content: str,
+    head_schema_content: str,
+    m1_plan_content: str,
+    migrations_content: str,
+) -> tuple[bool, str]:
+    has_notes = has_migration_notes(m1_plan_content, migrations_content)
+
+    if not previous_schema_content.strip():
+        if has_notes:
+            return True, "Tag mode: no previous schema diff context; Migration Notes found."
+        return False, "Tag mode: no previous schema diff context and Migration Notes missing."
+
+    if versions_changed(previous_schema_content, head_schema_content):
+        if has_notes:
+            return True, "Tag mode: schema versions changed and Migration Notes were provided."
+        return False, "Tag mode: schema versions changed but Migration Notes were not found."
+
+    return True, "Tag mode: schema versions unchanged."
+
+
 def _run_git_command(args: list[str]) -> tuple[int, str, str]:
     result = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
     return result.returncode, result.stdout, result.stderr
@@ -78,6 +100,27 @@ def _get_ref_file_content(ref: str, path: str) -> str:
 
 
 def main() -> int:
+    policy_mode = os.getenv("INVSTRUCT_POLICY_MODE", "").strip().lower()
+    ref_type = os.getenv("GITHUB_REF_TYPE", "").strip().lower()
+    tag_mode = policy_mode == "tag" or ref_type == "tag"
+    if tag_mode:
+        head_schema_content = Path(VERSION_FILE).read_text(encoding="utf-8", errors="ignore")
+        previous_schema_content = _get_ref_file_content("HEAD~1", VERSION_FILE)
+        m1_plan_content = (
+            Path(M1_PLAN_FILE).read_text(encoding="utf-8", errors="ignore") if Path(M1_PLAN_FILE).exists() else ""
+        )
+        migrations_content = (
+            Path(MIGRATIONS_FILE).read_text(encoding="utf-8", errors="ignore") if Path(MIGRATIONS_FILE).exists() else ""
+        )
+        ok, reason = evaluate_tag_policy(
+            previous_schema_content=previous_schema_content,
+            head_schema_content=head_schema_content,
+            m1_plan_content=m1_plan_content,
+            migrations_content=migrations_content,
+        )
+        print(f"[schema-policy] {reason}")
+        return 0 if ok else 2
+
     base_ref = os.getenv("GITHUB_BASE_REF", "").strip()
     if not base_ref:
         print("[schema-policy] no GITHUB_BASE_REF available, no diff context; pass.")

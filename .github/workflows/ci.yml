@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,8 +26,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Prepare output directory
+        run: mkdir -p out
+
       - name: Install dependencies
+        id: install
         run: |
+          set -o pipefail
           python -m pip install -U pip
           if python -m pip install -e ".[pdf]"; then
             echo "Installed project with [pdf] extra"
@@ -33,14 +41,113 @@ jobs:
           fi
 
       - name: Run tests
-        run: python -m pytest -q
+        id: pytest
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee out/pytest.log
 
       - name: Fetch PR base ref
         if: github.event_name == 'pull_request'
         run: git fetch origin "${{ github.base_ref }}" --depth=1
 
       - name: Schema bump policy
-        run: python scripts/check_schema_bump_policy.py
+        id: schema_policy
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python scripts/check_schema_bump_policy.py 2>&1 | tee out/schema_policy.log
 
       - name: Contract gates
-        run: python scripts/ci_contract_gates.py
+        id: contract_gates
+        continue-on-error: true
+        env:
+          INVSTRUCT_CI_REPORT: out/ci_gate_report.json
+        run: |
+          set -o pipefail
+          python scripts/ci_contract_gates.py 2>&1 | tee out/contract_gates.log
+
+      - name: CI summary
+        if: always()
+        run: |
+          {
+            echo "## CI Triage Summary";
+            echo "";
+            echo "- Pytest: ${{ steps.pytest.outcome }}";
+            echo "- Schema bump policy: ${{ steps.schema_policy.outcome }}";
+            echo "- Contract gates: ${{ steps.contract_gates.outcome }}";
+            echo "";
+            if [ "${{ steps.pytest.outcome }}" != "success" ] && [ -f out/pytest.log ]; then
+              echo "### Pytest failure tail";
+              echo '```text';
+              tail -n 40 out/pytest.log;
+              echo '```';
+              echo "";
+            fi
+            if [ "${{ steps.schema_policy.outcome }}" != "success" ] && [ -f out/schema_policy.log ]; then
+              echo "### Schema policy failure tail";
+              echo '```text';
+              tail -n 40 out/schema_policy.log;
+              echo '```';
+              echo "";
+            fi
+            if [ "${{ steps.contract_gates.outcome }}" != "success" ]; then
+              echo "### Contract gates failure tail";
+              if [ -f out/contract_gates.log ]; then
+                echo '```text';
+                tail -n 60 out/contract_gates.log;
+                echo '```';
+              fi
+              echo "";
+              echo "### Local reproduce commands";
+              echo "- \`python scripts/ci_contract_gates.py\`";
+              echo "- \`python scripts/check_schema_bump_policy.py\`";
+              echo "";
+            fi
+            if [ -f out/ci_gate_report.json ]; then
+              echo "### Contract gate report snapshot";
+              echo '```json';
+              python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("out/ci_gate_report.json")
+report = json.loads(path.read_text(encoding="utf-8"))
+summary = {
+    "ok": report.get("ok"),
+    "failed_step": report.get("failed_step"),
+    "steps": [
+        {
+            "name": step.get("name"),
+            "ok": step.get("ok"),
+            "returncode": step.get("returncode"),
+        }
+        for step in report.get("steps", [])
+    ],
+    "reproduce_commands": report.get("reproduce_commands", []),
+}
+print(json.dumps(summary, ensure_ascii=False, indent=2))
+PY
+              echo '```';
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload contract gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-gate-report-${{ matrix.python-version }}
+          path: |
+            out/ci_gate_report.json
+            out/pytest.log
+            out/schema_policy.log
+            out/contract_gates.log
+          if-no-files-found: warn
+
+      - name: Enforce gate results
+        if: always()
+        run: |
+          if [ "${{ steps.pytest.outcome }}" != "success" ] || [ "${{ steps.schema_policy.outcome }}" != "success" ] || [ "${{ steps.contract_gates.outcome }}" != "success" ]; then
+            echo "One or more CI gates failed."
+            exit 1
+          fi
