@@ -67,6 +67,16 @@ jobs:
           set -o pipefail
           python scripts/ci_contract_gates.py 2>&1 | tee out/contract_gates.log
 
+      - name: Emit PR annotations
+        if: always()
+        id: emit_annotations
+        continue-on-error: true
+        env:
+          INVSTRUCT_CI_REPORT: out/ci_gate_report.json
+          INVSTRUCT_ANNOTATION_MAX: 5
+          INVSTRUCT_ANNOTATION_LEVEL: error
+        run: python scripts/emit_ci_annotations.py --report out/ci_gate_report.json
+
       - name: CI summary
         if: always()
         run: |
@@ -76,6 +86,7 @@ jobs:
             echo "- Pytest: ${{ steps.pytest.outcome }}";
             echo "- Schema bump policy: ${{ steps.schema_policy.outcome }}";
             echo "- Contract gates: ${{ steps.contract_gates.outcome }}";
+            echo "- Emit annotations: ${{ steps.emit_annotations.outcome }}";
             echo "";
             if [ "${{ steps.pytest.outcome }}" != "success" ] && [ -f out/pytest.log ]; then
               echo "### Pytest failure tail";

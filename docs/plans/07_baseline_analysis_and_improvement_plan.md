@@ -14,9 +14,12 @@
 - Added gate report artifact (`out/ci_gate_report.json`) emission and workflow upload for PR triage.
 - Added release gate workflow for tag pushes (`v*`) enforcing tests + schema policy + contract gates.
 - Added regression tests for gate report persistence and tag-mode policy checks.
+- Added M1.11 PR-level gate annotations sourced from `ci_gate_report.json` with configurable limits.
+- Added release changelog consistency gate and JSON report artifact (`out/changelog_report.json`).
+- Added regression tests for annotation rendering limits/notice mode and changelog policy outcomes.
 
 ## Next
-- Add GitHub Checks annotations mapped from gate report failed steps for one-click triage.
+- Add smarter annotation routing with file/line hints where parser output allows.
 - Add signed release pipeline wiring after release gate success.
 
 ## Done (release bundle artifact filtering sync)

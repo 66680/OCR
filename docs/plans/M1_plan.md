@@ -36,3 +36,15 @@
 ### Next
 - Add PR-level annotations that link directly to failing command snippets in artifacts.
 - Extend release gate to verify changelog consistency with schema/version metadata.
+
+## M1.11: PR annotations and release changelog gate
+
+### Done
+- Added CI annotation emitter (`scripts/emit_ci_annotations.py`) to map gate report failures into GitHub log annotations.
+- Wired CI workflow to emit annotations on every run and keep gate semantics unchanged.
+- Added changelog consistency checker (`scripts/check_changelog_consistency.py`) and integrated it into tag release gate.
+- Added regression tests for annotation limits/ok-notice behavior and changelog consistency checks.
+
+### Next
+- Add file-level annotation mapping from command stderr patterns to improve triage accuracy.
+- Extend changelog check to validate subsection templates per release type.
