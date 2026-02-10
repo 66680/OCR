@@ -18,3 +18,14 @@
 ## Next
 - Add GitHub Checks annotations mapped from gate report failed steps for one-click triage.
 - Add signed release pipeline wiring after release gate success.
+
+## Done (release bundle artifact filtering sync)
+- Synced release packaging patch into git repo workspace from delivery workspace.
+- Added `scripts/package_release.py` with version-aware dist artifact picking:
+  - include only `invstruct-<version>-*.whl`
+  - include only `invstruct-<version>.tar.gz`
+- Added regression test `tests/test_package_release_filters_current_version.py` to prevent historical dist artifacts leaking into current release bundle.
+
+## Next (release pipeline alignment)
+- Backport missing M3-0/M3-1 release automation files (`release.ps1`, `release_check.py`, `dump_openapi.py`, release docs) into this git repo.
+- Run full release rehearsal in this git repo after release automation alignment.
