@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
+from openpyxl import Workbook
 
 from invstruct import __version__
 from invstruct.contracts.export_schema import (
+    REQUIRED_COLUMNS,
     get_export_contract_schema,
     validate_export_csv,
     validate_export_xlsx,
@@ -59,6 +63,113 @@ def parse(
 @app.command("health")
 def health() -> None:
     typer.echo("ok")
+
+
+def _record_to_export_row(record: InvoiceRecord) -> dict[str, str | float | int | None]:
+    return {
+        "file_name": record.source.file_name,
+        "sha256": record.source.sha256,
+        "trace_id": record.source.trace_id,
+        "merchant": record.merchant,
+        "issue_date": record.issue_date,
+        "total_amount_gross": record.total_amount_gross,
+        "currency": record.currency,
+        "status": record.status,
+        "error_code": record.error_code,
+        "error_message": record.error_message,
+        "warnings_count": len(record.warnings),
+        "parser_version": record.parser_version,
+        "retry_key": record.retry_key,
+    }
+
+
+def _write_export_csv(
+    csv_path: Path,
+    rows: list[dict[str, str | float | int | None]],
+    *,
+    no_header_comments: bool,
+) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8", newline="") as file_obj:
+        if not no_header_comments:
+            file_obj.write(f"# invstruct_export_schema_version={EXPORT_SCHEMA_VERSION}\n")
+            file_obj.write(f"# generated_at={datetime.now(UTC).isoformat()}\n")
+        writer = csv.DictWriter(file_obj, fieldnames=REQUIRED_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in REQUIRED_COLUMNS})
+
+
+def _write_export_xlsx(
+    xlsx_path: Path,
+    rows: list[dict[str, str | float | int | None]],
+) -> None:
+    xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    records_sheet = workbook.active
+    records_sheet.title = "records"
+    records_sheet.append(REQUIRED_COLUMNS)
+    for row in rows:
+        records_sheet.append([row.get(column, "") for column in REQUIRED_COLUMNS])
+
+    meta_sheet = workbook.create_sheet("_meta")
+    meta_sheet["A1"] = "invstruct_export_schema_version"
+    meta_sheet["B1"] = EXPORT_SCHEMA_VERSION
+    meta_sheet["A2"] = "generated_at"
+    meta_sheet["B2"] = datetime.now(UTC).isoformat()
+    meta_sheet["A3"] = "tool_version"
+    meta_sheet["B3"] = __version__
+    workbook.save(xlsx_path)
+    workbook.close()
+
+
+@app.command("export")
+def export(
+    records_jsonl: Path = typer.Argument(..., exists=True, readable=True),
+    csv_path: Path = typer.Option(..., "--csv"),
+    xlsx_path: Path = typer.Option(..., "--xlsx"),
+    no_header_comments: bool = typer.Option(False, "--no-header-comments"),
+) -> None:
+    rows: list[dict[str, str | float | int | None]] = []
+    with records_jsonl.open("r", encoding="utf-8", errors="ignore") as file_obj:
+        for line_no, line in enumerate(file_obj, start=1):
+            content = line.strip()
+            if not content:
+                continue
+            try:
+                data = json.loads(content)
+                record = InvoiceRecord.model_validate(data)
+            except Exception as exc:
+                trace_id = generate_trace_id()
+                typer.echo(
+                    json.dumps(
+                        error_payload(
+                            code="E5002",
+                            message="Contract validation failed",
+                            trace_id=trace_id,
+                            details={"reason": "invalid_record_for_export", "line_no": line_no, "message": str(exc)},
+                        ),
+                        ensure_ascii=False,
+                    )
+                )
+                raise typer.Exit(code=2)
+            rows.append(_record_to_export_row(record))
+
+    _write_export_csv(csv_path, rows, no_header_comments=no_header_comments)
+    _write_export_xlsx(xlsx_path, rows)
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "rows": len(rows),
+                "csv": str(csv_path),
+                "xlsx": str(xlsx_path),
+                "export_schema_version": EXPORT_SCHEMA_VERSION,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 @contract_app.command("show")

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          if python -m pip install -e ".[pdf]"; then
+            echo "Installed project with [pdf] extra"
+          else
+            python -m pip install -e .
+          fi
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Fetch PR base ref
+        if: github.event_name == 'pull_request'
+        run: git fetch origin "${{ github.base_ref }}" --depth=1
+
+      - name: Schema bump policy
+        run: python scripts/check_schema_bump_policy.py
+
+      - name: Contract gates
+        run: python scripts/ci_contract_gates.py
